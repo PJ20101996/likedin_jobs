@@ -1,0 +1,17 @@
+services:
+  - type: web
+    name: linkedin-job-extractor
+    env: python
+    plan: free  # Change to 'starter' or 'standard' for production
+    buildCommand: pip install -r requirements.txt
+    startCommand: streamlit run app.py --server.port=$PORT --server.address=0.0.0.0 --server.headless=true
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.11.0
+      - key: PORT
+        fromService:
+          type: web
+          name: linkedin-job-extractor
+          property: port
+    healthCheckPath: /
+

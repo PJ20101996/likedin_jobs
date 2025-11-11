@@ -13,7 +13,9 @@ def get_extraction_prompt(job_text):
     Returns:
         str: Formatted prompt string
     """
-    return f"""You are an expert data extraction assistant. Your task is to analyze raw LinkedIn job posting text and extract structured information into a specific JSON format.
+    return f"""You are a professional data extraction assistant. You must analyze the raw LinkedIn job posting text and extract TWO clear JSON objects:.
+1️⃣ "job_data" → contains information about the **job post only** (role, position, skills, etc.)
+2️⃣ "company_data" → contains information about the **company only** (organization overview, mission, website, etc.)
 
 INSTRUCTIONS:
 1. Carefully read the entire job posting text provided below.
@@ -32,7 +34,7 @@ FIELD EXTRACTION GUIDELINES:
 - company: Company name
 - company_url: Company website URL (if mentioned)
 - country: Country name where the job is located
-- description: Description about the posted job not about the company.    
+- description: ← ⚠️ this should describe only the job responsibilities/role, NOT the company details.    
 - description_full: Complete job description text
 - industry: Industry sector (e.g., "Technology", "Healthcare", "Finance")
 - job_description_roles_resp: Object with two arrays:
@@ -86,12 +88,89 @@ REQUIRED JSON STRUCTURE (you must return exactly this structure):
   "number_of_saved": 0
 }}
 
-CRITICAL: 
-- The job_description_roles_resp field MUST be a JSON object with "roles" and "responsibilities" as arrays
-- All string fields should be strings (use "" for empty, not null)
-- All number fields should be numbers (0, not "0")
-- Return ONLY valid JSON - no markdown, no code blocks, no explanations
-- Ensure proper JSON escaping for special characters
+
+-----------------------
+COMPANY DATA STRUCTURE (store in `companies` collection):
+-----------------------
+{{
+  "name": "",
+  "city": "",
+  "state": "",
+  "industry": "",
+  "description": "",
+  "url": "",
+  "company_domain": "",
+  "logo_url": "",
+  "company_id": ""
+}}
+
+COMPANY DATA EXTRACTION GUIDELINES (MUST EXTRACT ALL FIELDS):
+
+- name: Extract the company name (usually found at the top of the posting or in "About the company" section)
+
+- city: Extract the city where the company is located (from job location or company info)
+
+- state: Extract the state/province where the company is located
+
+- industry: Extract the industry sector (e.g., "IT Services and IT Consulting", "Software Development", "Technology", "Healthcare")
+
+- description: Must include the full company overview text. Look for:
+  * The section explicitly titled "About the company" or something similar they will mention about their company stuff
+  * Sentences starting with the company name ("Optum is a...", "Infosys is a global leader...", etc.)
+  * Paragraphs describing what the company does, its mission, employees, or services.
+  * Do NOT include job duties or responsibilities here.
+
+- url: Extract the company website URL if explicitly mentioned. Look for:
+  * Company website links (e.g., "www.infosys.com", "https://www.infosys.com", "Visit www.infosys.com")
+  * URLs in the "About the company" section or anywhere in the text
+  * Include the full URL as found (with or without http/https/www)
+  * If not found, leave as empty string ""
+
+- company_domain: Extract ONLY the domain name from the company URL:
+  * If url is "www.infosys.com" → extract "infosys.com"
+  * If url is "https://www.infosys.com" → extract "infosys.com"
+  * If url is "https://infosys.com" → extract "infosys.com"
+  * Remove "www.", "http://", "https://", and any paths
+  * If URL is not available but email is found (e.g., "hr@animaker.com"), extract domain from email (e.g., "animaker.com")
+  * If neither is available, leave as empty string ""
+
+- logo_url: Leave as empty string strictly ""
+
+- company_id: Leave as empty string "" unless a specific company ID is mentioned
+
+
+
+{{
+  "job_data": {{...}},
+  "company_data": {{...}}
+}}
+
+⚠️⚠️⚠️ CRITICAL EXTRACTION REQUIREMENTS ⚠️⚠️⚠️
+
+BEFORE EXTRACTING, READ THESE REQUIREMENTS CAREFULLY:
+
+1. COMPANY DESCRIPTION EXTRACTION (MOST IMPORTANT):
+   - You MUST search the ENTIRE text for company description paragraphs
+   - Look for text that describes the company - usually appears after the company name
+   - Common patterns: "CompanyName is a...", "We enable...", "With over X years...", "We do it by..."
+   - Extract EVERY sentence and paragraph that describes the company, its services, mission, experience, clients, employees
+   - DO NOT skip or leave empty if company description text exists
+   - Example from Infosys: "Infosys is a global leader in next-generation digital services and consulting. We enable clients in more than 50 countries to navigate their digital transformation. With over three decades of experience..." - EXTRACT ALL OF THIS
+   - The description field MUST contain the full company description text, not be empty
+
+2. COMPANY DOMAIN EXTRACTION:
+   - If you find a URL like "www.infosys.com" or "Visit www.infosys.com", extract the domain as "infosys.com"
+   - Remove "www.", "http://", "https://" prefixes
+   - Remove any paths after the domain
+   - If URL is "www.infosys.com" → company_domain should be "infosys.com"
+   - DO NOT leave company_domain empty if a URL is found
+
+3. JSON STRUCTURE:
+   - The job_description_roles_resp field MUST be a JSON object with "roles" and "responsibilities" as arrays
+   - All string fields should be strings (use "" for empty, not null)
+   - All number fields should be numbers (0, not "0")
+   - Return ONLY valid JSON - no markdown, no code blocks, no explanations
+   - Ensure proper JSON escaping for special characters
 
 Now, extract the information from the following job posting text and return ONLY the JSON object:
 

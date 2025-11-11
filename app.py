@@ -7,9 +7,13 @@ import streamlit as st
 import json
 import os
 from datetime import datetime
+from dotenv import load_dotenv
 from openai import OpenAI
 from prompts import get_extraction_prompt
-from utils.db_connection import insert_job_data, test_connection
+from utils.db_connection import insert_job_data, insert_company_data, test_connection
+
+# Load environment variables from .env file
+load_dotenv()
 
 # Page configuration
 st.set_page_config(
@@ -21,6 +25,8 @@ st.set_page_config(
 # Initialize session state
 if 'processed_data' not in st.session_state:
     st.session_state.processed_data = None
+if 'processed_company_data' not in st.session_state:
+    st.session_state.processed_company_data = None
 if 'insertion_success' not in st.session_state:
     st.session_state.insertion_success = False
 
@@ -33,14 +39,14 @@ def extract_job_data_with_llm(raw_text):
         raw_text (str): Raw LinkedIn job posting text
         
     Returns:
-        dict: Structured job data as dictionary
+        tuple: (job_data: dict, company_data: dict) - Structured job and company data as dictionaries
     """
     # Get API key from environment or Streamlit secrets
     api_key = os.getenv("OPENAI_API_KEY") or st.secrets.get("OPENAI_API_KEY", None)
     
     if not api_key:
         st.error("⚠️ OpenAI API key not found! Please set OPENAI_API_KEY environment variable or add it to Streamlit secrets.")
-        return None
+        return None, None
     
     try:
         # Initialize OpenAI client
@@ -94,7 +100,7 @@ def extract_job_data_with_llm(raw_text):
         
         # Parse JSON with better error handling
         try:
-            job_data = json.loads(json_text)
+            extracted_data = json.loads(json_text)
         except json.JSONDecodeError as json_error:
             # Show detailed error information
             error_msg = str(json_error)
@@ -116,15 +122,39 @@ def extract_job_data_with_llm(raw_text):
                 end_idx = json_text.rfind('}')
                 if start_idx != -1 and end_idx != -1 and end_idx > start_idx:
                     json_text = json_text[start_idx:end_idx+1]
-                    job_data = json.loads(json_text)
+                    extracted_data = json.loads(json_text)
                     st.warning("⚠️ Attempted to fix JSON by extracting the JSON object. Please verify the data.")
                 else:
-                    return None
+                    return None, None
             except:
-                return None
+                return None, None
         
-        # Ensure all required fields are present with defaults
-        default_structure = {
+        # Extract job_data and company_data from the response
+        job_data = extracted_data.get("job_data", {})
+        company_data = extracted_data.get("company_data", {})
+        
+        # If the response doesn't have the nested structure, assume it's all job data
+        if not job_data and not company_data:
+            # Check if it's the old format (all job data at root level)
+            if "position_title" in extracted_data or "company" in extracted_data:
+                job_data = extracted_data
+                # Try to extract company info from job data
+                company_data = {
+                    "name": extracted_data.get("company", ""),
+                    "city": extracted_data.get("city", ""),
+                    "state": extracted_data.get("state", ""),
+                    "industry": extracted_data.get("industry", ""),
+                    "description": "",  # Company description not in job data
+                    "url": extracted_data.get("company_url", ""),
+                    "company_domain": "",
+                    "logo_url": extracted_data.get("logo_url", ""),
+                    "company_id": ""
+                }
+            else:
+                return None, None
+        
+        # Ensure all required fields are present with defaults for job data
+        default_job_structure = {
             "application_link": "",
             "application_posted": "",
             "categories": [],
@@ -155,8 +185,8 @@ def extract_job_data_with_llm(raw_text):
             "number_of_saved": 0
         }
         
-        # Merge with defaults to ensure all fields exist
-        for key, default_value in default_structure.items():
+        # Merge with defaults to ensure all fields exist for job data
+        for key, default_value in default_job_structure.items():
             if key not in job_data:
                 job_data[key] = default_value
             # Handle nested structure for job_description_roles_resp
@@ -169,7 +199,25 @@ def extract_job_data_with_llm(raw_text):
                     if "responsibilities" not in job_data[key]:
                         job_data[key]["responsibilities"] = []
         
-        return job_data
+        # Ensure all required fields are present with defaults for company data
+        default_company_structure = {
+            "name": "",
+            "city": "",
+            "state": "",
+            "industry": "",
+            "description": "",
+            "url": "",
+            "company_domain": "",
+            "logo_url": "",
+            "company_id": ""
+        }
+        
+        # Merge with defaults to ensure all fields exist for company data
+        for key, default_value in default_company_structure.items():
+            if key not in company_data:
+                company_data[key] = default_value
+        
+        return job_data, company_data
         
     except json.JSONDecodeError as e:
         # This should not be reached due to inner try-catch, but keeping as backup
@@ -178,7 +226,7 @@ def extract_job_data_with_llm(raw_text):
             st.code(json_text[:1000] if 'json_text' in locals() else "No response received", language="json")
         except:
             pass
-        return None
+        return None, None
     except Exception as e:
         error_details = f"❌ Error calling LLM: {str(e)}"
         st.error(error_details)
@@ -188,7 +236,7 @@ def extract_job_data_with_llm(raw_text):
             if 'json_text' in locals():
                 st.text("Raw LLM Response:")
                 st.code(json_text[:2000], language="text")
-        return None
+        return None, None
 
 
 def main():
@@ -256,46 +304,93 @@ def main():
             else:
                 with st.spinner("🤖 Processing with AI..."):
                     # Extract data using LLM
-                    extracted_data = extract_job_data_with_llm(raw_text.strip())
+                    job_data, company_data = extract_job_data_with_llm(raw_text.strip())
                     
-                    if extracted_data:
-                        st.session_state.processed_data = extracted_data
+                    if job_data and company_data:
+                        st.session_state.processed_data = job_data
+                        st.session_state.processed_company_data = company_data
                         st.session_state.insertion_success = False
                         st.success("✅ Data extracted successfully!")
+                    elif job_data:
+                        st.session_state.processed_data = job_data
+                        st.session_state.processed_company_data = None
+                        st.session_state.insertion_success = False
+                        st.warning("⚠️ Job data extracted, but company data is missing.")
+                    else:
+                        st.error("❌ Failed to extract data from the job posting.")
         
         # Display extracted data
         if st.session_state.processed_data:
-            # Format JSON for display
-            json_display = json.dumps(st.session_state.processed_data, indent=2, ensure_ascii=False)
+            # Create tabs for job and company data
+            tab1, tab2 = st.tabs(["📋 Job Data", "🏢 Company Data"])
             
-            # Show JSON in expandable code block
-            with st.expander("📋 View Extracted JSON", expanded=True):
-                st.code(json_display, language="json")
+            with tab1:
+                # Format JSON for display
+                job_json_display = json.dumps(st.session_state.processed_data, indent=2, ensure_ascii=False)
+                
+                # Show JSON in expandable code block
+                with st.expander("📋 View Extracted Job JSON", expanded=True):
+                    st.code(job_json_display, language="json")
             
-            # Download button
-            st.download_button(
-                label="💾 Download JSON",
-                data=json_display,
-                file_name=f"job_data_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json",
-                mime="application/json"
-            )
+            with tab2:
+                if st.session_state.processed_company_data:
+                    # Format JSON for display
+                    company_json_display = json.dumps(st.session_state.processed_company_data, indent=2, ensure_ascii=False)
+                    
+                    # Show JSON in expandable code block
+                    with st.expander("📋 View Extracted Company JSON", expanded=True):
+                        st.code(company_json_display, language="json")
+                else:
+                    st.warning("⚠️ No company data extracted.")
+            
+            # Download buttons
+            col_dl1, col_dl2 = st.columns(2)
+            with col_dl1:
+                st.download_button(
+                    label="💾 Download Job JSON",
+                    data=job_json_display,
+                    file_name=f"job_data_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json",
+                    mime="application/json"
+                )
+            with col_dl2:
+                if st.session_state.processed_company_data:
+                    st.download_button(
+                        label="💾 Download Company JSON",
+                        data=company_json_display,
+                        file_name=f"company_data_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json",
+                        mime="application/json"
+                    )
             
             # Store to MongoDB button
             st.markdown("---")
             if st.button("💾 Store to MongoDB", type="primary", use_container_width=True):
                 try:
                     with st.spinner("💾 Storing data to MongoDB..."):
-                        # Make a copy to avoid modifying session state
-                        data_to_insert = st.session_state.processed_data.copy()
-                        document_id = insert_job_data(data_to_insert)
-                        st.session_state.insertion_success = True
-                        st.success(f"✅ Successfully stored to MongoDB!")
-                        st.info(f"📄 Document ID: `{document_id}`")
+                        # Make copies to avoid modifying session state
+                        job_data_to_insert = st.session_state.processed_data.copy()
+                        company_data_to_insert = st.session_state.processed_company_data.copy() if st.session_state.processed_company_data else None
+                        
+                        # Store job data
+                        job_document_id = insert_job_data(job_data_to_insert)
+                        st.success(f"✅ Job data stored successfully!")
+                        st.info(f"📄 Job Document ID: `{job_document_id}`")
                         st.info(f"🗄️ Database: `Kinnective_testing` | Collection: `linkedin_jobs`")
+                        
+                        # Store company data if available
+                        if company_data_to_insert:
+                            company_document_id = insert_company_data(company_data_to_insert)
+                            st.success(f"✅ Company data stored successfully!")
+                            st.info(f"📄 Company Document ID: `{company_document_id}`")
+                            st.info(f"🗄️ Database: `Kinnective_testing` | Collection: `companies`")
+                        
+                        st.session_state.insertion_success = True
                 except ValueError as e:
                     st.error(f"❌ Validation Error: {str(e)}")
                     with st.expander("🔍 Debug Info"):
-                        st.json(st.session_state.processed_data)
+                        st.json({
+                            "job_data": st.session_state.processed_data,
+                            "company_data": st.session_state.processed_company_data
+                        })
                 except Exception as e:
                     st.error(f"❌ Database Error: {str(e)}")
                     with st.expander("🔍 Error Details"):
