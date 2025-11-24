@@ -15,6 +15,94 @@ from utils.db_connection import insert_job_data, insert_company_data, test_conne
 # Load environment variables from .env file
 load_dotenv()
 
+
+def validate_job_posting_text(text):
+    """
+    Validate if the input text appears to be a job posting.
+    
+    Args:
+        text (str): Input text to validate
+        
+    Returns:
+        tuple: (is_valid: bool, error_message: str)
+    """
+    if not text or len(text.strip()) < 50:
+        return False, "⚠️ The input text is too short. Please paste the complete job posting content."
+    
+    text_lower = text.lower()
+    
+    # Check for job-related keywords (at least 3 should be present)
+    job_keywords = [
+        'job', 'position', 'role', 'career', 'opportunity', 'opening',
+        'company', 'employer', 'organization', 'hiring', 'recruiting',
+        'location', 'city', 'state', 'country', 'remote', 'hybrid', 'on-site',
+        'responsibilities', 'requirements', 'qualifications', 'skills',
+        'experience', 'years', 'full-time', 'part-time', 'contract',
+        'salary', 'compensation', 'benefits', 'apply', 'application',
+        'engineer', 'developer', 'manager', 'analyst', 'specialist', 'associate'
+    ]
+    
+    found_keywords = [keyword for keyword in job_keywords if keyword in text_lower]
+    
+    # Check for common job posting patterns
+    job_patterns = [
+        'about the job', 'job description', 'job title', 'position title',
+        'we are seeking', 'we are looking for', 'join our team',
+        'required skills', 'technical skills', 'must have', 'should have'
+    ]
+    
+    found_patterns = [pattern for pattern in job_patterns if pattern in text_lower]
+    
+    # Need at least 3 keywords OR at least 1 pattern to be considered valid
+    if len(found_keywords) < 3 and len(found_patterns) == 0:
+        return False, """⚠️ **Invalid Input: This doesn't appear to be a job posting.**
+        
+Please ensure you paste the **complete job description** from LinkedIn, including:
+- ✅ Job title/position name
+- ✅ Company name  
+- ✅ Location information (city, state, country)
+- ✅ Job responsibilities or requirements
+- ✅ Skills or qualifications needed
+- ✅ Any other job-related details
+
+**Please copy and paste the full job posting content from LinkedIn.**"""
+    
+    # Check for common non-job content indicators
+    invalid_indicators = [
+        'lorem ipsum', 'test text', 'sample text', 'placeholder',
+        'this is a test', 'dummy data', 'example text', 'random text'
+    ]
+    
+    for indicator in invalid_indicators:
+        if indicator in text_lower:
+            return False, f"⚠️ **Invalid Input:** The text contains test/placeholder content ('{indicator}').\n\nPlease paste **actual job posting content** from LinkedIn."
+    
+    # Check if text seems too generic or random (should have reasonable word count)
+    word_count = len(text.split())
+    if word_count < 20:
+        return False, f"⚠️ **Input too short:** The text has only {word_count} words, which is too short for a job posting.\n\nPlease paste the **complete job posting** with all details."
+    
+    # Additional check: Should contain at least one location indicator
+    location_indicators = ['location', 'city', 'state', 'country', 'remote', 'hybrid', 'on-site', 'india', 'bengaluru', 'mumbai', 'delhi', 'pune']
+    has_location = any(indicator in text_lower for indicator in location_indicators)
+    
+    # Additional check: Should contain company or job title indicators
+    title_indicators = ['engineer', 'developer', 'manager', 'analyst', 'specialist', 'associate', 'lead', 'senior', 'junior']
+    has_title = any(indicator in text_lower for indicator in title_indicators)
+    
+    if not has_location and not has_title and len(found_keywords) < 5:
+        return False, """⚠️ **Input validation failed:** The text doesn't contain enough job posting indicators.
+        
+Please make sure you're pasting:
+- A complete LinkedIn job posting
+- Including job title, company name, and location
+- With job responsibilities and requirements
+
+**Please copy the entire job posting from LinkedIn and try again.**"""
+    
+    return True, ""
+
+
 # Page configuration
 st.set_page_config(
     page_title="LinkedIn Job Extractor",
@@ -57,7 +145,7 @@ def extract_job_data_with_llm(raw_text):
         
         # Call OpenAI API
         response = client.chat.completions.create(
-            model="gpt-4o-mini",  # Using gpt-4o-mini for cost efficiency, can be changed to gpt-4
+            model="gpt-4.1-nano",  # Using gpt-4o-mini for cost efficiency, can be changed to gpt-4
             messages=[
                 {
                     "role": "system",
@@ -68,7 +156,7 @@ def extract_job_data_with_llm(raw_text):
                     "content": formatted_prompt
                 }
             ],
-            temperature=0.1,  # Low temperature for consistent extraction
+              # Low temperature for consistent extraction
             response_format={"type": "json_object"}  # Force JSON response
         )
         

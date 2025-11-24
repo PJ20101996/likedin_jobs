@@ -27,6 +27,20 @@ INSTRUCTIONS:
 
 FIELD EXTRACTION GUIDELINES:
 
+application_link MUST be extracted from the text**  
+Job postings often embed links like Google Forms, company career URLs, SmartRecruiters, Greenhouse, Taleo, Zoho Recruit, or short links.  
+Extract ANY link that appears to be used for applying, including links that appear after phrases like:
+- "Apply here"
+- "Click the link"
+- "Submit your application"
+- "Fill this form"
+- "Apply now"
+- “Use this Google Form”
+- “Career page link”
+
+If multiple links exist → choose the one MOST related to applying.  
+If none exist → keep application_link as empty string.
+
 - application_link: Direct URL to apply for the job (if mentioned)
 - application_posted: Date when the job was posted (format: YYYY-MM-DD or as found)
 - categories: Array of job categories/tags (e.g., ["Engineering", "Software Development"])
