@@ -42,7 +42,15 @@ If multiple links exist → choose the one MOST related to applying.
 If none exist → keep application_link as empty string.
 
 - application_link: Direct URL to apply for the job (if mentioned)
-- application_posted: Date when the job was posted (format: YYYY-MM-DD or as found)
+- application_posted: Date when the job was posted (format: YYYY-MM-DD). 
+  **IMPORTANT**: If the posting mentions relative time like "4 weeks ago", "1 month ago", "2 days ago", etc., you MUST calculate the actual date by subtracting that time from TODAY's date.
+  Examples:
+  - "4 weeks ago" → Calculate: Today's date minus 28 days (format as YYYY-MM-DD)
+  - "1 month ago" → Calculate: Today's date minus 30 days (format as YYYY-MM-DD)
+  - "2 weeks ago" → Calculate: Today's date minus 14 days (format as YYYY-MM-DD)
+  - "3 days ago" → Calculate: Today's date minus 3 days (format as YYYY-MM-DD)
+  Use TODAY's date (current date) as the reference point for all calculations.
+  If no date information is found, leave as empty string ""
 - categories: Array of job categories/tags (e.g., ["Engineering", "Software Development"])
 - city: City name where the job is located
 - company: Company name
@@ -63,7 +71,7 @@ If none exist → keep application_link as empty string.
 - salary: Salary range or compensation information (if mentioned)
 - start_date: Expected start date or "Immediate" if mentioned
 - state: State/province name (if applicable)
-- created_date: Use current date in YYYY-MM-DD format
+- created_date: Set to today's date in YYYY-MM-DD format (use the current date, not a date from the job posting)
 - logo_url: Leave empty unless specifically mentioned
 - number_of_viewed: Set to 0
 - number_of_applied: Set to 0

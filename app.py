@@ -6,7 +6,8 @@ Main application for extracting structured data from LinkedIn job postings.
 import streamlit as st
 import json
 import os
-from datetime import datetime
+from datetime import datetime, timedelta
+import re
 from dotenv import load_dotenv
 from openai import OpenAI
 from prompts import get_extraction_prompt
@@ -119,6 +120,63 @@ if 'insertion_success' not in st.session_state:
     st.session_state.insertion_success = False
 
 
+def parse_relative_date(text, field_value=""):
+    """
+    Parse relative date expressions like "4 weeks ago", "1 month ago" from text
+    and calculate the actual date.
+    
+    Args:
+        text (str): Raw job posting text to search for relative dates
+        field_value (str): The value returned by LLM (might already be calculated)
+        
+    Returns:
+        str: Calculated date in YYYY-MM-DD format, or empty string if not found
+    """
+    # First, search for relative date patterns in the text (prioritize this)
+    text_lower = text.lower()
+    
+    # Pattern: "X weeks ago", "X week ago"
+    week_match = re.search(r'(\d+)\s+weeks?\s+ago', text_lower)
+    if week_match:
+        weeks = int(week_match.group(1))
+        calculated_date = datetime.now() - timedelta(weeks=weeks)
+        return calculated_date.strftime("%Y-%m-%d")
+    
+    # Pattern: "X months ago", "X month ago"
+    month_match = re.search(r'(\d+)\s+months?\s+ago', text_lower)
+    if month_match:
+        months = int(month_match.group(1))
+        # Approximate: 1 month = 30 days
+        calculated_date = datetime.now() - timedelta(days=months * 30)
+        return calculated_date.strftime("%Y-%m-%d")
+    
+    # Pattern: "X days ago", "X day ago"
+    day_match = re.search(r'(\d+)\s+days?\s+ago', text_lower)
+    if day_match:
+        days = int(day_match.group(1))
+        calculated_date = datetime.now() - timedelta(days=days)
+        return calculated_date.strftime("%Y-%m-%d")
+    
+    # Pattern: "X years ago", "X year ago" (usually not relevant for job postings, but handle it)
+    year_match = re.search(r'(\d+)\s+years?\s+ago', text_lower)
+    if year_match:
+        years = int(year_match.group(1))
+        calculated_date = datetime.now() - timedelta(days=years * 365)
+        return calculated_date.strftime("%Y-%m-%d")
+    
+    # If no relative date found in text, check if LLM already calculated a valid date
+    if field_value and re.match(r'^\d{4}-\d{2}-\d{2}$', field_value):
+        try:
+            parsed = datetime.strptime(field_value, "%Y-%m-%d")
+            # Only use if it's a recent date (not from 2023 or earlier)
+            if parsed.year >= 2024:
+                return field_value
+        except:
+            pass
+    
+    return field_value if field_value else ""
+
+
 def extract_job_data_with_llm(raw_text):
     """
     Send raw job text to LLM and get structured JSON response.
@@ -221,6 +279,12 @@ def extract_job_data_with_llm(raw_text):
         job_data = extracted_data.get("job_data", {})
         company_data = extracted_data.get("company_data", {})
         
+        # DEBUG: Check what LLM returned for created_date
+        if job_data and "created_date" in job_data:
+            llm_created_date = job_data.get("created_date")
+            if llm_created_date and "2023" in str(llm_created_date):
+                st.warning(f"⚠️ DEBUG: LLM returned created_date as: '{llm_created_date}' (This will be kept because it exists in the response)")
+        
         # If the response doesn't have the nested structure, assume it's all job data
         if not job_data and not company_data:
             # Check if it's the old format (all job data at root level)
@@ -304,6 +368,17 @@ def extract_job_data_with_llm(raw_text):
         for key, default_value in default_company_structure.items():
             if key not in company_data:
                 company_data[key] = default_value
+        
+        # Parse relative dates for application_posted (e.g., "4 weeks ago" → actual date)
+        if job_data and "application_posted" in job_data:
+            llm_date = job_data.get("application_posted", "")
+            calculated_date = parse_relative_date(raw_text, llm_date)
+            if calculated_date and calculated_date != llm_date:
+                job_data["application_posted"] = calculated_date
+        
+        # Force created_date to always be current date (override any LLM-provided date)
+        current_date = datetime.now().strftime("%Y-%m-%d")
+        job_data["created_date"] = current_date
         
         return job_data, company_data
         
